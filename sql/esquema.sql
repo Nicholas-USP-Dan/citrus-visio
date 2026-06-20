@@ -10,8 +10,9 @@ CHECK(VALUE ~ '^\d{14}$');
 CREATE DOMAIN num_funcional_domain AS char(20)
 CHECK(VALUE ~ '^\d{20}$');
 
-CREATE DOMAIN cpf_domain AS char(14)
-CHECK(VALUE ~ '^\d{14}$');
+-- CPF sem pontuacao tem 11 digitos
+CREATE DOMAIN cpf_domain AS char(11)
+CHECK(VALUE ~ '^\d{11}$');
 
 
 CREATE DOMAIN chave_acesso_nf_domain AS CHAR(44)
@@ -116,8 +117,8 @@ CREATE TABLE funcionario (
 	cpf cpf_domain NOT NULL,
 	salario DECIMAL(10, 2) NOT NULL,
 	data_contratacao DATE NOT NULL,
-	email email_domain,
-	telefone tel_domain,
+	email email_domain NOT NULL,
+	telefone tel_domain NOT NULL,
 	nome VARCHAR(30) NOT NULL,
 	cargo VARCHAR(13) NOT NULL,
 
@@ -155,15 +156,18 @@ CREATE TABLE operador (
 
 CREATE TABLE representante_comercial (
 	num_funcional num_funcional_domain,
-	comissao DECIMAL(5,4),
+	-- Comissao obrigatoria, fracao decimal entre 0 e 1 (ex.: 0.0500 = 5%)
+	comissao DECIMAL(5,4) NOT NULL,
 
 
 	CONSTRAINT pk_representante PRIMARY KEY(num_funcional),
 
-	CONSTRAINT fk_representante FOREIGN KEY(num_funcional) 
-  REFERENCES funcionario(num_funcional) 
-  ON DELETE CASCADE 
-  ON UPDATE CASCADE
+	CONSTRAINT fk_representante FOREIGN KEY(num_funcional)
+  REFERENCES funcionario(num_funcional)
+  ON DELETE CASCADE
+  ON UPDATE CASCADE,
+
+  CONSTRAINT ck_representante_comissao CHECK (comissao >= 0 AND comissao <= 1)
 );
 
 CREATE TABLE ordem_producao (
@@ -195,18 +199,24 @@ CREATE TABLE insumo (
 	nota_fiscal chave_acesso_nf_domain,
 	cnpj_fornecedor cnpj_domain NOT NULL,
 	tipo_insumo text NOT NULL,
-	custo numeric(9,3),
+	custo numeric(9,3) NOT NULL,
 	data_aquisicao date NOT NULL,
-	quantidade integer,
+	quantidade integer NOT NULL,
 	ordem_producao bigint,
 
 
 	CONSTRAINT pk_insumo PRIMARY KEY(nota_fiscal),
-	
+
   CONSTRAINT fk_tipo_insumo FOREIGN KEY(tipo_insumo)
   REFERENCES tipo_insumo(tipo)
   ON DELETE RESTRICT
   ON UPDATE RESTRICT,
+
+  -- Apagar fornecedor nao deve apagar historico de insumos (rastreabilidade)
+  CONSTRAINT fk_insumo_fornecedor FOREIGN KEY(cnpj_fornecedor)
+  REFERENCES fornecedor(cnpj)
+  ON DELETE RESTRICT
+  ON UPDATE CASCADE,
 
   CONSTRAINT fk_insumo_ordem FOREIGN KEY(ordem_producao)
   REFERENCES ordem_producao(id)
@@ -249,7 +259,7 @@ CREATE TABLE geracao_residuo (
 CREATE TABLE tipo_produto (
 	tipo text,
 	qtd_estoque integer,
-	preco numeric(10,3),
+	preco numeric(10,3) NOT NULL,
 
 
 	CONSTRAINT pk_tipo_produto PRIMARY KEY(tipo),
@@ -266,7 +276,7 @@ CREATE TABLE lote_produto (
   status text NOT NULL,
   unidades_restantes integer,
   unidades_produzidas integer NOT NULL,
-  validade date,
+  validade date NOT NULL,
 
 
   CONSTRAINT pk_lote_produto PRIMARY KEY(id),
@@ -377,14 +387,15 @@ CREATE TABLE venda (
 
 	CONSTRAINT pk_venda PRIMARY KEY(nota_fiscal),
 
+	-- Rastreabilidade: apagar cliente/representante nao deve apagar historico de vendas
 	CONSTRAINT fk_venda_cliente FOREIGN KEY(cliente)
 	REFERENCES cliente(cnpj)
-	ON DELETE CASCADE
+	ON DELETE RESTRICT
 	ON UPDATE CASCADE,
 
 	CONSTRAINT fk_venda_rep FOREIGN KEY(representante)
 	REFERENCES representante_comercial(num_funcional)
-	ON DELETE CASCADE
+	ON DELETE RESTRICT
 	ON UPDATE CASCADE,
 
 	CONSTRAINT venda_valor_pos CHECK (valor > 0)
