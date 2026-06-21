@@ -1,5 +1,4 @@
 
-
 -- O CPF e o CNPJ tem codigos verificadores, acho que daria para usa-los na implementacao
 
 -- Eu estou usando o formatação como na documentacao do postgres
@@ -7,8 +6,8 @@
 CREATE DOMAIN cnpj_domain AS char(14)
 CHECK(VALUE ~ '^\d{14}$');
 
-CREATE DOMAIN num_funcional_domain AS char(20)
-CHECK(VALUE ~ '^\d{20}$');
+CREATE DOMAIN num_funcional_domain AS char(10)
+CHECK(VALUE ~ '^\d{10}$');
 
 -- CPF sem pontuacao tem 11 digitos
 CREATE DOMAIN cpf_domain AS char(11)
