@@ -106,7 +106,7 @@ SELECT
     COUNT(DISTINCT v.nota_fiscal)    AS total_compras
 FROM clientes_com_cobertura cc
 JOIN pessoa_juridica pj ON cc.cnpj_cliente = pj.cnpj
-JOIN venda           v  ON v.cliente      = cl.cnpj
+JOIN venda           v  ON v.cliente      = cc.cnpj_cliente
 GROUP BY pj.cnpj, pj.nome_fantasia
 ORDER BY faixa_valor_total_gasto, total_compras DESC;
 
