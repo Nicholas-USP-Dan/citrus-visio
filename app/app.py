@@ -1,7 +1,11 @@
 # Eu honestamente não sei o que estou fazendo aqui,
 # então se der alguma m**** pra vocês, podem fazer
 # qualquer coisa
-from app_ui import registrar_frame_cadastro_insumo, registrar_frame_consulta_ordens  # pyright: ignore[reportImplicitRelativeImport]
+from app_ui import (  # pyright: ignore[reportImplicitRelativeImport]
+    registrar_frame_cadastro_insumo,
+    registrar_frame_consulta_ordens,
+    registrar_frame_relatorio,
+)
 
 import os
 import tkinter as tk
@@ -101,6 +105,9 @@ def monta_ui(root: Tk, db_conn: connection) -> None:
 
     # Aba 2: Consulta de Ordens — captura o widget tree para o toggle_theme
     ordens_tree = registrar_frame_consulta_ordens(notebook, db_conn)
+
+    # Aba 3: Gerar Relatório de Resíduos
+    registrar_frame_relatorio(notebook, db_conn)
 
     # Forçar renderização geométrica
     root.update()

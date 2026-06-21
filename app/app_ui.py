@@ -1,4 +1,6 @@
-import datetime
+from montar_relatorio import montar_pdf  # pyright: ignore[reportImplicitRelativeImport]
+
+from datetime import datetime, date
 import re
 import tkinter as tk
 from decimal import Decimal, InvalidOperation
@@ -28,7 +30,7 @@ def validate_num(s: str) -> bool:
         return False
 
 
-def obter_tipos(search: str, db_conn: connection) -> list[str]:
+def obter_tipos_insumos(search: str, db_conn: connection) -> list[str]:
     """
     Busca por 10 tipos de insumos baseados na entrada `search`.
     """
@@ -44,7 +46,7 @@ def obter_tipos(search: str, db_conn: connection) -> list[str]:
         return []
 
 
-def filter_tipos(combobox: ttk.Combobox, db_conn: connection):
+def filter_tipos_insumos(combobox: ttk.Combobox, db_conn: connection):
     """
     Construtor de trigger de evento para ser acionado conforme
     a entrada de tipo de insumo for sendo escrita.
@@ -52,7 +54,7 @@ def filter_tipos(combobox: ttk.Combobox, db_conn: connection):
 
     def f(event: Event):  # pyright: ignore[reportUnusedParameter]
         entrada = combobox.get()
-        sugestoes = obter_tipos(entrada, db_conn)
+        sugestoes = obter_tipos_insumos(entrada, db_conn)
         combobox["values"] = sugestoes
 
     return f
@@ -63,7 +65,7 @@ def salvar_insumo(
     cnpj: str,
     tipo: str,
     custo_str: str,
-    data: datetime.date,
+    data: date,
     quant_str: str,
     db_conn: connection,
 ) -> None:
@@ -228,8 +230,8 @@ def registrar_frame_cadastro_insumo(
     tipo_label.grid(row=4, column=0, sticky="e", padx=(0, 12), pady=7)
     tipo_entry = ttk.Combobox(container, width=33)
     # Mecanismo de sugestoes dos tipos
-    tipo_entry["values"] = obter_tipos("", db_conn)
-    _ = tipo_entry.bind("<KeyRelease>", filter_tipos(tipo_entry, db_conn))
+    tipo_entry["values"] = obter_tipos_insumos("", db_conn)
+    _ = tipo_entry.bind("<KeyRelease>", filter_tipos_insumos(tipo_entry, db_conn))
     tipo_entry.grid(row=4, column=1, sticky="w", pady=7)
 
     # Entrada para o custo do insumo
@@ -267,7 +269,7 @@ def registrar_frame_cadastro_insumo(
         cnpj = forn_entry.get().strip()
         tipo = tipo_entry.get().strip()
         custo_str = custo_entry.get().strip()
-        data: datetime.date = aquisicao_entry.get_date()  # Retorna datetime.date
+        data: date = aquisicao_entry.get_date()  # Retorna datetime.date
         quant_str = quant_entry.get().strip()
 
         try:
@@ -281,7 +283,7 @@ def registrar_frame_cadastro_insumo(
             quant_entry.delete(0, tk.END)
 
             # Atualizar sugestões no Combobox
-            tipo_entry["values"] = obter_tipos("", db_conn)
+            tipo_entry["values"] = obter_tipos_insumos("", db_conn)
 
         except Exception as _:
             pass
@@ -454,3 +456,149 @@ def registrar_frame_consulta_ordens(
 
     # Retorna o widget tree para que o tema possa atualizar as cores das zebra stripes
     return tree
+
+
+def montar_relatorio(inicio: date, fim: date, db_conn: connection):
+    try:
+        with db_conn.cursor() as cur:
+            # Query: Busca por todas as operações COMEÇADAS E TERMINADAS dentro do intervalo
+            # de tempo dado, e dá a soma de todos os gastos hídricos e energéticos.
+            #
+            # Motivo: A maioria das operações começam e terminam no mesmo dia, assim, este
+            # sacrifício não é tão impactante. Além disso, operações em andamento, considerando
+            # que demoram somente 1 dia, não devem ser consideradas no relatório
+            sum_gastos_query = """
+                    SELECT SUM(op.gasto_hidrico),
+                           SUM(op.gasto_energetico)
+                           
+                    FROM operacao op
+                    WHERE op.data_hora_inicio >= %s AND op.data_hora_fim <= %s
+                    """
+
+            inicio_datetime = datetime(inicio.year, inicio.month, inicio.day)
+            fim_datetime = datetime(fim.year, fim.month, fim.day)
+            cur.execute(sum_gastos_query, (inicio_datetime, fim_datetime))
+
+            total_hidrico: Decimal
+            total_energetico: Decimal
+            total_hidrico, total_energetico = cur.fetchone()  # pyright: ignore[reportGeneralTypeIssues, reportUnknownVariableType]
+
+            # Query: Busca pela massa total de resíduos gerada por ordens que começaram
+            # entre a data de início e fim
+            sum_residuos_query = """
+                SELECT SUM(gr_res.massa_total)
+                FROM geracao_residuo gr_res
+                     JOIN ordem_producao ord_prod
+                     ON gr_res.ordem_prod = ord_prod.id
+                WHERE ord_prod.data_hora_inicio BETWEEN %s AND %s
+            """
+
+            cur.execute(sum_residuos_query, (inicio_datetime, fim_datetime))
+            sum_residuos = cur.fetchone()[0]
+
+            # Query: Lista os gastos hídricos e energéticos da fábrica, por mês (dentro do intervalo)
+            gastos_pmes_query = """
+                SELECT SUM(op.gasto_hidrico) AS gasto_hidrico,
+                       SUM(op.gasto_energetico) AS gasto_energetico,
+                       TO_CHAR(op.data_hora_inicio, 'YYYY/Mon') AS mes_ano
+                FROM operacao op
+                WHERE op.data_hora_inicio >= %s AND op.data_hora_fim <= %s
+                GROUP BY mes_ano
+                ORDER BY MIN(op.data_hora_inicio);
+            """
+
+            cur.execute(gastos_pmes_query, (inicio_datetime, fim_datetime))
+            gastos_pmes = cur.fetchall()
+
+            # Query: Lista a massa total de resíduos gerados, por mês, por tipo de resíduo
+            sum_residuos_pmes_ptipo_query = """
+                SELECT SUM(gr_res.massa_total),
+                       gr_res.tipo_residuo,
+                       TO_CHAR(ord_prod.data_hora_inicio, 'YYYY/Mon') AS mes_ano
+                FROM geracao_residuo gr_res
+                     JOIN ordem_producao ord_prod
+                     ON gr_res.ordem_prod = ord_prod.id
+                WHERE ord_prod.data_hora_inicio BETWEEN %s AND %s
+                GROUP BY mes_ano, gr_res.tipo_residuo
+                ORDER BY MIN(ord_prod.data_hora_inicio), gr_res.tipo_residuo;
+            """
+
+            cur.execute(sum_residuos_pmes_ptipo_query, (inicio_datetime, fim_datetime))
+            sum_residuos_pmes_ptipo = cur.fetchall()
+            montar_pdf(
+                inicio,
+                fim,
+                total_hidrico,
+                total_energetico,
+                sum_residuos,
+                gastos_pmes,
+                sum_residuos_pmes_ptipo,
+                f"relatorio_{inicio}_{fim}.pdf",
+            )
+            _ = messagebox.showinfo("Mensagem", "Relatório gerado com sucesso!")
+
+    except Exception as e:
+        db_conn.rollback()
+        _ = messagebox.showerror(
+            "Erro Inesperado", f"Ocorreu um erro ao pesquisar:\n\n{str(e)}"
+        )
+
+
+def registrar_frame_relatorio(notebook: ttk.Notebook, db_conn: connection) -> None:
+    """
+    Registra o frame com a funcionalidade 'Gerar relatório de resíduos'
+    com parente `notebook`
+    """
+    # Configuração inicial
+    frame = ttk.Frame(notebook)
+    frame.grid(sticky="nsew")
+
+    # Frame cresce junto com a janela
+    _ = frame.columnconfigure(0, weight=1)
+    _ = frame.rowconfigure(0, weight=1)
+
+    # Container centralizado dentro do frame como um Card Fluent moderno
+    container = ttk.Frame(frame, style="Card", padding=25)
+    container.grid(row=0, column=0, padx=20, pady=20)
+    _ = container.columnconfigure(0, weight=1)
+    _ = container.columnconfigure(1, weight=1)
+
+    # Configuração do título com fonte maior e em negrito
+    header = ttk.Label(container, text="Gerar Relatório", font="-size 14 -weight bold")
+    header.grid(row=0, column=0, columnspan=4, pady=(0, 8))
+
+    # Separador visual abaixo do título
+    sep = ttk.Separator(container, orient="horizontal")
+    sep.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(0, 16))
+
+    inicio_label = ttk.Label(container, text="Data de início:", font="-weight bold")
+    inicio_label.grid(row=2, column=0, sticky="e", padx=(0, 12), pady=7)
+    inicio_entry = DateEntry(container, locale="pt_BR", width=13)
+    inicio_entry.grid(row=2, column=1, sticky="w", pady=7)  # pyright: ignore[reportUnknownMemberType]
+
+    fim_label = ttk.Label(container, text="Data de fim:", font="-weight bold")
+    fim_label.grid(row=2, column=2, sticky="e", padx=(24, 12), pady=7)
+    fim_entry = DateEntry(container, locale="pt_BR", width=13)
+    fim_entry.grid(row=2, column=3, sticky="w", pady=7)  # pyright: ignore[reportUnknownMemberType]
+
+    def gerar_relatorio_btn():
+        inicio: date = inicio_entry.get_date()
+        fim: date = fim_entry.get_date()
+
+        if fim < inicio:
+            _ = messagebox.showwarning(
+                "Intervalo inválido",
+                "Por favor, insira um interválo de tempo válido",
+            )
+        else:
+            montar_relatorio(inicio, fim, db_conn)
+
+    btn_salvar = ttk.Button(
+        container,
+        text="Produzir relatório",
+        command=gerar_relatorio_btn,
+        style="Accent.TButton",
+    )
+    btn_salvar.grid(row=5, column=0, columnspan=4, pady=(0, 4))
+
+    notebook.add(frame, text="Gerar Relatório")
