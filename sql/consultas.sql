@@ -25,27 +25,23 @@ ORDER BY total_gasto_energetico_kwh DESC;
 
 -- ========================================================================================
 -- CONSULTA 2 (COMPLEXIDADE MÉDIA): JUNÇÃO EXTERNA
--- OBJETIVO: Para cada ordem finalizada, calcular a massa total de resíduo gerada
---           e o custo total de laranjas consumidas, retornando uma taxa de resíduo
---           por unidade de custo (para controle ambiental e eficiência de produção).
+-- OBJETIVO: Consultar o tipo de resíduo predominante (de maior massa total) em cada
+--           ordem de produção. Inclui ordens sem nenhum resíduo registrado, que aparecem
+--           com tipo '-' e massa 0.
+-- OBS.: a chave de geracao_residuo é (ordem_prod, tipo_residuo), logo cada tipo aparece
+--       no máximo uma vez por ordem. Por isso não faz sentido medir o "mais gerado" por
+--       contagem; usa-se massa_total como critério, e DISTINCT ON para pegar o maior por ordem.
 -- ========================================================================================
-SELECT
-    op.id                                                       AS id_ordem,
-    f.nome                                                      AS nome_gerente,
-    op.data_hora_inicio,
-    SUM(gr.massa_total)                                         AS massa_residuo_total_kg,
-    SUM(i.custo)                                                AS custo_laranjas_total,
-    ROUND(SUM(gr.massa_total) / NULLIF(SUM(i.custo), 0), 4)     AS taxa_residuo_por_custo
+SELECT DISTINCT ON (op.id)
+    f.nome                            AS nome_gerente,
+    op.id                             AS id_ordem,
+    COALESCE(gr.tipo_residuo, '-')    AS tipo_residuo_predominante,
+    COALESCE(gr.massa_total, 0)       AS massa_total
 FROM
     ordem_producao op
-JOIN funcionario f          ON f.num_funcional   = op.gerente
-JOIN geracao_residuo gr     ON gr.ordem_prod      = op.id
-LEFT JOIN insumo i          ON i.ordem_producao   = op.id
-                           AND UPPER(i.tipo_insumo) LIKE 'LARANJA%'
-WHERE
-    op.data_hora_fim IS NOT NULL
-GROUP BY op.id, f.nome, op.data_hora_inicio
-ORDER BY taxa_residuo_por_custo DESC NULLS LAST;
+JOIN      funcionario     f  ON f.num_funcional = op.gerente
+LEFT JOIN geracao_residuo gr ON gr.ordem_prod   = op.id
+ORDER BY op.id, gr.massa_total DESC NULLS LAST;
 
 -- ========================================================================================
 -- CONSULTA 3 (COMPLEXIDADE MÉDIA): FILTRAGEM E ANTI-JUNÇÃO
