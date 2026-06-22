@@ -1,9 +1,7 @@
-# Eu honestamente não sei o que estou fazendo aqui,
-# então se der alguma m**** pra vocês, podem fazer
-# qualquer coisa
 from app_ui import (  # pyright: ignore[reportImplicitRelativeImport]
     registrar_frame_cadastro_insumo,
     registrar_frame_consulta_ordens,
+    registrar_frame_consulta_vendas,
     registrar_frame_relatorio,
 )
 
@@ -64,6 +62,9 @@ def monta_ui(root: Tk, db_conn: connection) -> None:
             # Zebra stripes adaptadas para o modo escuro
             _ = ordens_tree.tag_configure("par", background="#2d2d2d")
             _ = ordens_tree.tag_configure("impar", background="#383838")
+            _ = vendas_tree.tag_configure("par",   background="#2d2d2d")
+            _ = vendas_tree.tag_configure("impar", background="#383838")
+            
         else:
             style.theme_use("forest-light")
             _ = status_lbl.configure(
@@ -72,6 +73,9 @@ def monta_ui(root: Tk, db_conn: connection) -> None:
             # Zebra stripes adaptadas para o modo claro
             _ = ordens_tree.tag_configure("par", background="#f7f9f7")
             _ = ordens_tree.tag_configure("impar", background="#ffffff")
+            _ = vendas_tree.tag_configure("par",   background="#f7f9f7")
+            _ = vendas_tree.tag_configure("par",   background="#ffffff")
+            
 
         # Reaplica configurações de abas à esquerda
         style.configure("lefttab.TNotebook", tabposition="wn")
@@ -106,7 +110,10 @@ def monta_ui(root: Tk, db_conn: connection) -> None:
     # Aba 2: Consulta de Ordens — captura o widget tree para o toggle_theme
     ordens_tree = registrar_frame_consulta_ordens(notebook, db_conn)
 
-    # Aba 3: Gerar Relatório de Resíduos
+    # Aba 3: Consulta de vendas — captura o widget tree para o toggle_theme
+    vendas_tree = registrar_frame_consulta_vendas(notebook, db_conn)
+
+    # Aba 4: Gerar Relatório de Resíduos
     registrar_frame_relatorio(notebook, db_conn)
 
     # Forçar renderização geométrica

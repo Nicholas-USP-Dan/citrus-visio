@@ -544,6 +544,74 @@ def montar_relatorio(inicio: date, fim: date, db_conn: connection):
         )
 
 
+def realizar_busca_vendas(
+    termo_representante: str,
+    termo_cliente: str,
+    tree: ttk.Treeview,
+    db_conn: connection,
+):
+    """
+    Executa a consulta de vendas por representante comercial,
+    filtrada por nome do representante e/ou nome fantasia do cliente,
+    incluindo o valor de comissão gerado por cada venda.
+    """
+    try:
+        with db_conn.cursor() as cur:
+            # Consulta SQL explícita e parametrizada (segurança contra SQL Injection)
+            query = """
+                SELECT
+                    v.nota_fiscal,
+                    f.nome                                      AS nome_representante,
+                    pj.nome_fantasia                            AS cliente,
+                    TO_CHAR(v.data, 'DD/MM/YYYY')              AS data_venda,
+                    v.valor,
+                    ROUND(v.valor * rc.comissao, 2)            AS comissao_gerada
+                FROM
+                    venda v
+                JOIN representante_comercial rc ON rc.num_funcional = v.representante
+                JOIN funcionario f              ON f.num_funcional   = rc.num_funcional
+                JOIN cliente cl                 ON cl.cnpj           = v.cliente
+                JOIN pessoa_juridica pj         ON pj.cnpj           = cl.cnpj
+                WHERE
+                    f.nome              ILIKE %s
+                    AND pj.nome_fantasia ILIKE %s
+                ORDER BY v.data DESC, v.valor DESC;
+            """
+            cur.execute(query, (f"%{termo_representante}%", f"%{termo_cliente}%"))
+            rows = cur.fetchall()
+
+            for i, row in enumerate(rows):
+                # Trunca a nota fiscal (44 dígitos) para caber na coluna:
+                # exibe primeiros 10 + "..." + últimos 6
+                nf_raw: str = row[0]
+                nf_display = (
+                    f"{nf_raw[:10]}...{nf_raw[-6:]}" if len(nf_raw) > 20 else nf_raw
+                )
+                valor = f"R$ {float(row[4]):.2f}"  # pyright: ignore[reportAny]
+                comissao = f"R$ {float(row[5]):.2f}"  # pyright: ignore[reportAny]
+                # Alterna o tag para criar efeito zebra (linhas pares e ímpares)
+                tag = "par" if i % 2 == 0 else "impar"
+                _ = tree.insert(
+                    "",
+                    "end",
+                    values=(nf_display, row[1], row[2], row[3], valor, comissao),
+                    tags=(tag,),
+                )
+
+    except psy.DatabaseError as e:
+        db_conn.rollback()
+        _ = messagebox.showerror(
+            "Erro de Banco de Dados",
+            f"Erro ao buscar vendas:\n\n{e.pgerror or str(e)}",
+        )
+
+    except Exception as e:
+        db_conn.rollback()
+        _ = messagebox.showerror(
+            "Erro Inesperado", f"Ocorreu um erro ao pesquisar:\n\n{str(e)}"
+        )
+
+
 def registrar_frame_relatorio(notebook: ttk.Notebook, db_conn: connection) -> None:
     """
     Registra o frame com a funcionalidade 'Gerar relatório de resíduos'
@@ -602,3 +670,109 @@ def registrar_frame_relatorio(notebook: ttk.Notebook, db_conn: connection) -> No
     btn_salvar.grid(row=5, column=0, columnspan=4, pady=(0, 4))
 
     notebook.add(frame, text="Gerar Relatório")
+
+
+def registrar_frame_consulta_vendas(
+    notebook: ttk.Notebook, db_conn: connection
+) -> ttk.Treeview:
+    """
+    Registra o frame com a funcionalidade 'Consulta de Vendas por Representante'
+    com parente `notebook`.
+    """
+    frame = ttk.Frame(notebook, padding=15)
+    frame.grid(sticky="nsew")
+
+    # Layout responsivo
+    _ = frame.columnconfigure(0, weight=1)
+    _ = frame.rowconfigure(1, weight=1)  # A tabela crescerá verticalmente
+
+    # 1. Painel de Filtro de Busca (Estilizado como Card Fluent)
+    search_frame = ttk.Frame(frame, style="Card", padding=15)
+    search_frame.grid(row=0, column=0, sticky="ew", pady=(0, 15))
+    _ = search_frame.columnconfigure(1, weight=1)
+    _ = search_frame.columnconfigure(3, weight=1)
+
+    lbl_rep = ttk.Label(search_frame, text="Representante:", font="-weight bold")
+    lbl_rep.grid(row=0, column=0, sticky="w", padx=(0, 8))
+
+    ent_representante = ttk.Entry(search_frame)
+    ent_representante.grid(row=0, column=1, sticky="ew", padx=(0, 20))
+
+    lbl_cli = ttk.Label(search_frame, text="Cliente:", font="-weight bold")
+    lbl_cli.grid(row=0, column=2, sticky="w", padx=(0, 8))
+
+    ent_cliente = ttk.Entry(search_frame)
+    ent_cliente.grid(row=0, column=3, sticky="ew", padx=(0, 15))
+
+    # Botão de busca estilizado com Accent
+    btn_buscar = ttk.Button(
+        search_frame,
+        text="Buscar",
+        style="Accent.TButton",
+        command=lambda: realizar_busca_btn(),
+    )
+    btn_buscar.grid(row=0, column=4, sticky="e")
+
+    # 2. Tabela de Resultados (Treeview)
+    table_frame = ttk.Frame(frame)
+    table_frame.grid(row=1, column=0, sticky="nsew")
+    _ = table_frame.columnconfigure(0, weight=1)
+    _ = table_frame.rowconfigure(0, weight=1)
+
+    # Definir colunas da Treeview
+    columns = ("nota_fiscal", "representante", "cliente", "data", "valor", "comissao")
+    tree = ttk.Treeview(
+        table_frame, columns=columns, show="headings", selectmode="browse"
+    )
+
+    # Configurar cabeçalhos
+    tree.heading("nota_fiscal", text="Nota Fiscal")
+    tree.heading("representante", text="Representante")
+    tree.heading("cliente", text="Cliente")
+    tree.heading("data", text="Data")
+    tree.heading("valor", text="Valor")
+    tree.heading("comissao", text="Comissão Gerada")
+
+    # Configurar dimensões e alinhamentos
+    _ = tree.column("nota_fiscal", width=160, anchor="center")
+    _ = tree.column("representante", width=180, anchor="w")
+    _ = tree.column("cliente", width=180, anchor="w")
+    _ = tree.column("data", width=100, anchor="center")
+    _ = tree.column("valor", width=110, anchor="e")
+    _ = tree.column("comissao", width=120, anchor="e")
+
+    # Barras de rolagem
+    vsb = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview)
+    hsb = ttk.Scrollbar(table_frame, orient="horizontal", command=tree.xview)
+    _ = tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+    tree.grid(row=0, column=0, sticky="nsew")
+    vsb.grid(row=0, column=1, sticky="ns")
+    hsb.grid(row=1, column=0, sticky="ew")
+
+    # Lógica de Busca parametrizada
+    def realizar_busca_btn():
+        termo_rep = ent_representante.get().strip()
+        termo_cli = ent_cliente.get().strip()
+
+        # Limpa os itens atuais
+        for item in tree.get_children():
+            tree.delete(item)
+
+        realizar_busca_vendas(termo_rep, termo_cli, tree, db_conn)
+
+    # Configura zebra stripes (cores alternadas entre linhas)
+    _ = tree.tag_configure("par", background="#f7f9f7")
+    _ = tree.tag_configure("impar", background="#ffffff")
+
+    # Vincula o Enter à execução da busca em ambos os campos
+    _ = ent_representante.bind("<Return>", lambda e: realizar_busca_btn())
+    _ = ent_cliente.bind("<Return>", lambda e: realizar_busca_btn())
+
+    # Preenche a busca inicial vazia (todas)
+    realizar_busca_btn()
+
+    notebook.add(frame, text="Vendas por Representante")
+
+    # Retorna o widget tree para que o tema possa atualizar as cores das zebra stripes
+    return tree
